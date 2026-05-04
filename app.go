@@ -46,14 +46,14 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) startHotkeyListener() {
-	hook.Register(hook.KeyDown, []string{"f6"}, func(e hook.Event) {
+	hook.Register(hook.KeyDown, []string{"ctrl", "f6"}, func(e hook.Event) {
 		status := a.engine.GetStatus()
 		if status == engine.StatusStopped {
 			a.engine.Start()
 		}
 	})
 
-	hook.Register(hook.KeyDown, []string{"f7"}, func(e hook.Event) {
+	hook.Register(hook.KeyDown, []string{"ctrl", "f7"}, func(e hook.Event) {
 		status := a.engine.GetStatus()
 		if status == engine.StatusRunning {
 			a.engine.Stop()

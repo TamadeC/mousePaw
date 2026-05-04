@@ -1,14 +1,12 @@
 export namespace config {
 	
 	export class Config {
-	    move_enabled: boolean;
+	    operation_type: string;
 	    move_interval: number;
 	    move_random: boolean;
-	    click_enabled: boolean;
 	    click_interval: number;
 	    click_type: string;
 	    click_count: number;
-	    scroll_enabled: boolean;
 	    scroll_interval: number;
 	    scroll_dir: string;
 	    scroll_amount: number;
@@ -21,14 +19,12 @@ export namespace config {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.move_enabled = source["move_enabled"];
+	        this.operation_type = source["operation_type"];
 	        this.move_interval = source["move_interval"];
 	        this.move_random = source["move_random"];
-	        this.click_enabled = source["click_enabled"];
 	        this.click_interval = source["click_interval"];
 	        this.click_type = source["click_type"];
 	        this.click_count = source["click_count"];
-	        this.scroll_enabled = source["scroll_enabled"];
 	        this.scroll_interval = source["scroll_interval"];
 	        this.scroll_dir = source["scroll_dir"];
 	        this.scroll_amount = source["scroll_amount"];

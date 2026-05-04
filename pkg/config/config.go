@@ -15,6 +15,14 @@ const (
 	ClickMiddle ClickType = "middle"
 )
 
+type OperationType string
+
+const (
+	OpMove   OperationType = "move"
+	OpClick  OperationType = "click"
+	OpScroll OperationType = "scroll"
+)
+
 type ScrollDirection string
 
 const (
@@ -27,30 +35,26 @@ const (
 type Config struct {
 	mu sync.RWMutex `json:"-"`
 
-	MoveEnabled    bool    `json:"move_enabled"`
-	MoveInterval   float64 `json:"move_interval"`
-	MoveRandom     bool    `json:"move_random"`
-	ClickEnabled   bool    `json:"click_enabled"`
-	ClickInterval  float64 `json:"click_interval"`
-	ClickType      ClickType `json:"click_type"`
-	ClickCount     int     `json:"click_count"`
-	ScrollEnabled  bool    `json:"scroll_enabled"`
-	ScrollInterval float64 `json:"scroll_interval"`
+	OperationType  OperationType   `json:"operation_type"`
+	MoveInterval   float64         `json:"move_interval"`
+	MoveRandom     bool            `json:"move_random"`
+	ClickInterval  float64         `json:"click_interval"`
+	ClickType      ClickType       `json:"click_type"`
+	ClickCount     int             `json:"click_count"`
+	ScrollInterval float64         `json:"scroll_interval"`
 	ScrollDir      ScrollDirection `json:"scroll_dir"`
-	ScrollAmount   int     `json:"scroll_amount"`
-	AutoStart      bool    `json:"auto_start"`
-	MinimizeToTray bool    `json:"minimize_to_tray"`
+	ScrollAmount   int             `json:"scroll_amount"`
+	AutoStart      bool            `json:"auto_start"`
+	MinimizeToTray bool            `json:"minimize_to_tray"`
 }
 
 var defaultConfig = Config{
-	MoveEnabled:    false,
+	OperationType:  OpMove,
 	MoveInterval:   5.0,
 	MoveRandom:     true,
-	ClickEnabled:   false,
 	ClickInterval:  3.0,
 	ClickType:      ClickLeft,
 	ClickCount:     1,
-	ScrollEnabled:  false,
 	ScrollInterval: 5.0,
 	ScrollDir:      ScrollDown,
 	ScrollAmount:   3,
@@ -71,7 +75,56 @@ func Load() *Config {
 	if err != nil {
 		return cfg
 	}
-	_ = json.Unmarshal(data, cfg)
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return cfg
+	}
+
+	// 迁移旧配置：检查是否存在旧的 enabled 字段
+	if moveEnabled, ok := raw["move_enabled"].(bool); ok && moveEnabled {
+		cfg.OperationType = OpMove
+	} else if clickEnabled, ok := raw["click_enabled"].(bool); ok && clickEnabled {
+		cfg.OperationType = OpClick
+	} else if scrollEnabled, ok := raw["scroll_enabled"].(bool); ok && scrollEnabled {
+		cfg.OperationType = OpScroll
+	}
+
+	// 解析新字段
+	if opType, ok := raw["operation_type"].(string); ok {
+		cfg.OperationType = OperationType(opType)
+	}
+	if v, ok := raw["move_interval"].(float64); ok {
+		cfg.MoveInterval = v
+	}
+	if v, ok := raw["move_random"].(bool); ok {
+		cfg.MoveRandom = v
+	}
+	if v, ok := raw["click_interval"].(float64); ok {
+		cfg.ClickInterval = v
+	}
+	if v, ok := raw["click_type"].(string); ok {
+		cfg.ClickType = ClickType(v)
+	}
+	if v, ok := raw["click_count"].(float64); ok {
+		cfg.ClickCount = int(v)
+	}
+	if v, ok := raw["scroll_interval"].(float64); ok {
+		cfg.ScrollInterval = v
+	}
+	if v, ok := raw["scroll_dir"].(string); ok {
+		cfg.ScrollDir = ScrollDirection(v)
+	}
+	if v, ok := raw["scroll_amount"].(float64); ok {
+		cfg.ScrollAmount = int(v)
+	}
+	if v, ok := raw["auto_start"].(bool); ok {
+		cfg.AutoStart = v
+	}
+	if v, ok := raw["minimize_to_tray"].(bool); ok {
+		cfg.MinimizeToTray = v
+	}
+
 	return cfg
 }
 
@@ -89,14 +142,12 @@ func (c *Config) GetAll() Config {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return Config{
-		MoveEnabled:    c.MoveEnabled,
+		OperationType:  c.OperationType,
 		MoveInterval:   c.MoveInterval,
 		MoveRandom:     c.MoveRandom,
-		ClickEnabled:   c.ClickEnabled,
 		ClickInterval:  c.ClickInterval,
 		ClickType:      c.ClickType,
 		ClickCount:     c.ClickCount,
-		ScrollEnabled:  c.ScrollEnabled,
 		ScrollInterval: c.ScrollInterval,
 		ScrollDir:      c.ScrollDir,
 		ScrollAmount:   c.ScrollAmount,
@@ -108,14 +159,12 @@ func (c *Config) GetAll() Config {
 func (c *Config) Update(cfg Config) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.MoveEnabled = cfg.MoveEnabled
+	c.OperationType = cfg.OperationType
 	c.MoveInterval = cfg.MoveInterval
 	c.MoveRandom = cfg.MoveRandom
-	c.ClickEnabled = cfg.ClickEnabled
 	c.ClickInterval = cfg.ClickInterval
 	c.ClickType = cfg.ClickType
 	c.ClickCount = cfg.ClickCount
-	c.ScrollEnabled = cfg.ScrollEnabled
 	c.ScrollInterval = cfg.ScrollInterval
 	c.ScrollDir = cfg.ScrollDir
 	c.ScrollAmount = cfg.ScrollAmount

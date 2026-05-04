@@ -92,43 +92,46 @@ func (e *Engine) ReloadConfig(cfg *config.Config) {
 }
 
 func (e *Engine) run() {
-	var moveTicker, clickTicker, scrollTicker *time.Ticker
-	var moveDone, clickDone, scrollDone <-chan time.Time
+	var ticker *time.Ticker
+	var done <-chan time.Time
 
-	if e.cfg.MoveEnabled {
+	switch e.cfg.OperationType {
+	case config.OpMove:
 		interval := time.Duration(e.cfg.MoveInterval * float64(time.Second))
-		moveTicker = time.NewTicker(interval)
-		moveDone = moveTicker.C
-		defer moveTicker.Stop()
+		ticker = time.NewTicker(interval)
+		done = ticker.C
+		defer ticker.Stop()
 		e.logger.Info(fmt.Sprintf("鼠标移动已启用，间隔 %.1f 秒", e.cfg.MoveInterval))
-	}
-
-	if e.cfg.ClickEnabled {
+	case config.OpClick:
 		interval := time.Duration(e.cfg.ClickInterval * float64(time.Second))
-		clickTicker = time.NewTicker(interval)
-		clickDone = clickTicker.C
-		defer clickTicker.Stop()
+		ticker = time.NewTicker(interval)
+		done = ticker.C
+		defer ticker.Stop()
 		e.logger.Info(fmt.Sprintf("鼠标点击已启用，间隔 %.1f 秒", e.cfg.ClickInterval))
-	}
-
-	if e.cfg.ScrollEnabled {
+	case config.OpScroll:
 		interval := time.Duration(e.cfg.ScrollInterval * float64(time.Second))
-		scrollTicker = time.NewTicker(interval)
-		scrollDone = scrollTicker.C
-		defer scrollTicker.Stop()
+		ticker = time.NewTicker(interval)
+		done = ticker.C
+		defer ticker.Stop()
 		e.logger.Info(fmt.Sprintf("滚轮滚动已启用，间隔 %.1f 秒", e.cfg.ScrollInterval))
+	default:
+		e.logger.Error("未知的操作类型: " + string(e.cfg.OperationType))
+		return
 	}
 
 	for {
 		select {
 		case <-e.stopChan:
 			return
-		case <-moveDone:
-			e.doMove()
-		case <-clickDone:
-			e.doClick()
-		case <-scrollDone:
-			e.doScroll()
+		case <-done:
+			switch e.cfg.OperationType {
+			case config.OpMove:
+				e.doMove()
+			case config.OpClick:
+				e.doClick()
+			case config.OpScroll:
+				e.doScroll()
+			}
 		}
 	}
 }

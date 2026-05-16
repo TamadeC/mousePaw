@@ -21,6 +21,8 @@ const (
 	OpMove   OperationType = "move"
 	OpClick  OperationType = "click"
 	OpScroll OperationType = "scroll"
+	OpType   OperationType = "type"
+	OpReplay OperationType = "replay"
 )
 
 type ScrollDirection string
@@ -31,6 +33,20 @@ const (
 	ScrollLeft  ScrollDirection = "left"
 	ScrollRight ScrollDirection = "right"
 )
+
+type HotkeyAction string
+
+const (
+	HotkeyStart HotkeyAction = "start"
+	HotkeyStop  HotkeyAction = "stop"
+	HotkeyPause HotkeyAction = "pause"
+)
+
+type HotkeyConfig struct {
+	Start string `json:"start"`
+	Stop  string `json:"stop"`
+	Pause string `json:"pause"`
+}
 
 type Config struct {
 	mu sync.RWMutex `json:"-"`
@@ -44,8 +60,14 @@ type Config struct {
 	ScrollInterval float64         `json:"scroll_interval"`
 	ScrollDir      ScrollDirection `json:"scroll_dir"`
 	ScrollAmount   int             `json:"scroll_amount"`
+	TypeInterval   float64         `json:"type_interval"`
+	TypeText       string          `json:"type_text"`
+	ReplayInterval float64         `json:"replay_interval"`
+	ReplayRepeat   bool            `json:"replay_repeat"`
+	ReplayFile     string          `json:"replay_file"`
 	AutoStart      bool            `json:"auto_start"`
 	MinimizeToTray bool            `json:"minimize_to_tray"`
+	Hotkeys        HotkeyConfig    `json:"hotkeys"`
 }
 
 var defaultConfig = Config{
@@ -58,8 +80,18 @@ var defaultConfig = Config{
 	ScrollInterval: 5.0,
 	ScrollDir:      ScrollDown,
 	ScrollAmount:   3,
+	TypeInterval:   1.0,
+	TypeText:       "",
+	ReplayInterval: 30.0,
+	ReplayRepeat:   false,
+	ReplayFile:     "",
 	AutoStart:      false,
 	MinimizeToTray: true,
+	Hotkeys: HotkeyConfig{
+		Start: "ctrl+f6",
+		Stop:  "ctrl+f7",
+		Pause: "ctrl+f8",
+	},
 }
 
 func configPath() string {
@@ -118,11 +150,37 @@ func Load() *Config {
 	if v, ok := raw["scroll_amount"].(float64); ok {
 		cfg.ScrollAmount = int(v)
 	}
+	if v, ok := raw["type_interval"].(float64); ok {
+		cfg.TypeInterval = v
+	}
+	if v, ok := raw["type_text"].(string); ok {
+		cfg.TypeText = v
+	}
+	if v, ok := raw["replay_interval"].(float64); ok {
+		cfg.ReplayInterval = v
+	}
+	if v, ok := raw["replay_repeat"].(bool); ok {
+		cfg.ReplayRepeat = v
+	}
+	if v, ok := raw["replay_file"].(string); ok {
+		cfg.ReplayFile = v
+	}
 	if v, ok := raw["auto_start"].(bool); ok {
 		cfg.AutoStart = v
 	}
 	if v, ok := raw["minimize_to_tray"].(bool); ok {
 		cfg.MinimizeToTray = v
+	}
+	if hotkeys, ok := raw["hotkeys"].(map[string]interface{}); ok {
+		if v, ok := hotkeys["start"].(string); ok {
+			cfg.Hotkeys.Start = v
+		}
+		if v, ok := hotkeys["stop"].(string); ok {
+			cfg.Hotkeys.Stop = v
+		}
+		if v, ok := hotkeys["pause"].(string); ok {
+			cfg.Hotkeys.Pause = v
+		}
 	}
 
 	return cfg
@@ -151,8 +209,14 @@ func (c *Config) GetAll() Config {
 		ScrollInterval: c.ScrollInterval,
 		ScrollDir:      c.ScrollDir,
 		ScrollAmount:   c.ScrollAmount,
+		TypeInterval:   c.TypeInterval,
+		TypeText:       c.TypeText,
+		ReplayInterval: c.ReplayInterval,
+		ReplayRepeat:   c.ReplayRepeat,
+		ReplayFile:     c.ReplayFile,
 		AutoStart:      c.AutoStart,
 		MinimizeToTray: c.MinimizeToTray,
+		Hotkeys:        c.Hotkeys,
 	}
 }
 
@@ -168,6 +232,12 @@ func (c *Config) Update(cfg Config) {
 	c.ScrollInterval = cfg.ScrollInterval
 	c.ScrollDir = cfg.ScrollDir
 	c.ScrollAmount = cfg.ScrollAmount
+	c.TypeInterval = cfg.TypeInterval
+	c.TypeText = cfg.TypeText
+	c.ReplayInterval = cfg.ReplayInterval
+	c.ReplayRepeat = cfg.ReplayRepeat
+	c.ReplayFile = cfg.ReplayFile
 	c.AutoStart = cfg.AutoStart
 	c.MinimizeToTray = cfg.MinimizeToTray
+	c.Hotkeys = cfg.Hotkeys
 }

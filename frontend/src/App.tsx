@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { GetConfig, UpdateConfig, GetStatus, Start, Stop, GetLogs } from '../wailsjs/go/main/App';
+import { GetConfig, UpdateConfig, GetStatus, Start, Stop, Pause, Resume, GetLogs, StartRecording, StopRecording, GetRecordingStatus, GetRecording, ClearRecording, SaveRecording, LoadRecording, ListRecordings, DeleteRecording } from '../wailsjs/go/main/App';
 import { EventsOn } from '../wailsjs/runtime/runtime';
+import { config as WailsModels } from '../wailsjs/go/models';
+import { recorder as RecorderModels } from '../wailsjs/go/models';
 
 interface Config {
   operation_type: string;
@@ -12,8 +14,18 @@ interface Config {
   scroll_interval: number;
   scroll_dir: string;
   scroll_amount: number;
+  type_interval: number;
+  type_text: string;
+  replay_interval: number;
+  replay_repeat: boolean;
+  replay_file: string;
   auto_start: boolean;
   minimize_to_tray: boolean;
+  hotkeys: {
+    start: string;
+    stop: string;
+    pause: string;
+  };
 }
 
 interface LogEntry {
@@ -22,7 +34,11 @@ interface LogEntry {
   message: string;
 }
 
-type Status = 'stopped' | 'running';
+type RecorderStatusInfo = RecorderModels.RecorderStatusInfo;
+type RecordedAction = RecorderModels.RecordedAction;
+type Recording = RecorderModels.Recording;
+
+type Status = 'stopped' | 'running' | 'paused';
 
 const defaultConfig: Config = {
   operation_type: 'move',
@@ -34,21 +50,38 @@ const defaultConfig: Config = {
   scroll_interval: 5,
   scroll_dir: 'down',
   scroll_amount: 3,
+  type_interval: 1,
+  type_text: '',
+  replay_interval: 30,
+  replay_repeat: false,
+  replay_file: '',
   auto_start: false,
   minimize_to_tray: true,
+  hotkeys: {
+    start: 'ctrl+f6',
+    stop: 'ctrl+f7',
+    pause: 'ctrl+f8',
+  },
 };
 
 export default function App() {
   const [config, setConfig] = useState<Config>(defaultConfig);
   const [status, setStatus] = useState<Status>('stopped');
-  const [activeTab, setActiveTab] = useState<'settings' | 'system' | 'logs'>('settings');
+  const [activeTab, setActiveTab] = useState<'settings' | 'system' | 'logs' | 'recording'>('settings');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
+
+  const [recorderStatus, setRecorderStatus] = useState<RecorderStatusInfo>({ status: 'idle', count: 0, duration: 0 });
+  const [recording, setRecording] = useState<Recording | null>(null);
+  const [savedFiles, setSavedFiles] = useState<string[]>([]);
+  const [saveName, setSaveName] = useState('');
 
   useEffect(() => {
     loadConfig();
     loadStatus();
     loadLogs();
+    loadRecordingStatus();
+    loadSavedFiles();
 
     const cleanupStatus = EventsOn('statusChanged', (s: string) => {
       setStatus(s as Status);
@@ -58,9 +91,14 @@ export default function App() {
       setLogs(prev => [...prev, entry]);
     });
 
+    const cleanupRecorder = EventsOn('recorderStatus', (info: RecorderStatusInfo) => {
+      setRecorderStatus(info);
+    });
+
     return () => {
       cleanupStatus();
       cleanupLog();
+      cleanupRecorder();
     };
   }, []);
 
@@ -97,24 +135,132 @@ export default function App() {
     }
   }
 
+  async function loadRecordingStatus() {
+    try {
+      const s = await GetRecordingStatus();
+      setRecorderStatus(s);
+    } catch (e) {
+      console.error('Failed to load recorder status:', e);
+    }
+  }
+
+  async function loadSavedFiles() {
+    try {
+      const files = await ListRecordings();
+      setSavedFiles(files);
+    } catch (e) {
+      console.error('Failed to load recordings:', e);
+    }
+  }
+
   async function updateConfig(key: keyof Config, value: any) {
     const newConfig = { ...config, [key]: value };
     setConfig(newConfig);
     try {
-      await UpdateConfig(newConfig);
+      await UpdateConfig(WailsModels.Config.createFrom(newConfig));
     } catch (e) {
       console.error('Failed to save config:', e);
+    }
+  }
+
+  async function handleStart() {
+    try {
+      await Start();
+    } catch (e) {
+      console.error('Failed to start:', e);
+    }
+  }
+
+  async function handleStop() {
+    try {
+      await Stop();
+    } catch (e) {
+      console.error('Failed to stop:', e);
+    }
+  }
+
+  async function handlePause() {
+    try {
+      await Pause();
+    } catch (e) {
+      console.error('Failed to pause:', e);
+    }
+  }
+
+  async function handleResume() {
+    try {
+      await Resume();
+    } catch (e) {
+      console.error('Failed to resume:', e);
+    }
+  }
+
+  async function handleStartRecording() {
+    try {
+      await StartRecording();
+    } catch (e) {
+      console.error('Failed to start recording:', e);
+    }
+  }
+
+  async function handleStopRecording() {
+    try {
+      const rec = await StopRecording();
+      if (rec) setRecording(rec);
+      await loadSavedFiles();
+    } catch (e) {
+      console.error('Failed to stop recording:', e);
+    }
+  }
+
+  async function handleClearRecording() {
+    try {
+      await ClearRecording();
+      setRecording(null);
+    } catch (e) {
+      console.error('Failed to clear recording:', e);
+    }
+  }
+
+  async function handleSaveRecording() {
+    if (!saveName.trim()) return;
+    try {
+      await SaveRecording(saveName.trim());
+      setSaveName('');
+      await loadSavedFiles();
+    } catch (e) {
+      console.error('Failed to save recording:', e);
+    }
+  }
+
+  async function handleLoadRecording(name: string) {
+    try {
+      const rec = await LoadRecording(name);
+      if (rec) setRecording(rec);
+    } catch (e) {
+      console.error('Failed to load recording:', e);
+    }
+  }
+
+  async function handleDeleteRecording(name: string) {
+    try {
+      await DeleteRecording(name);
+      await loadSavedFiles();
+    } catch (e) {
+      console.error('Failed to delete recording:', e);
     }
   }
 
   const statusColors = {
     stopped: 'bg-gray-500',
     running: 'bg-green-500',
+    paused: 'bg-yellow-500',
   };
 
   const statusLabels = {
     stopped: '已停止',
     running: '运行中',
+    paused: '已暂停',
   };
 
   return (
@@ -133,6 +279,48 @@ export default function App() {
           <span className={`w-2.5 h-2.5 rounded-full ${statusColors[status]} animate-pulse`} />
           <span className="text-sm text-gray-400">{statusLabels[status]}</span>
         </div>
+        <div className="flex items-center gap-2">
+          {status === 'stopped' && (
+            <button
+              onClick={handleStart}
+              className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white text-sm rounded-lg transition-colors"
+            >
+              开始
+            </button>
+          )}
+          {status === 'running' && (
+            <>
+              <button
+                onClick={handlePause}
+                className="px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white text-sm rounded-lg transition-colors"
+              >
+                暂停
+              </button>
+              <button
+                onClick={handleStop}
+                className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg transition-colors"
+              >
+                停止
+              </button>
+            </>
+          )}
+          {status === 'paused' && (
+            <>
+              <button
+                onClick={handleResume}
+                className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white text-sm rounded-lg transition-colors"
+              >
+                恢复
+              </button>
+              <button
+                onClick={handleStop}
+                className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg transition-colors"
+              >
+                停止
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Main Content */}
@@ -141,6 +329,7 @@ export default function App() {
         <div className="flex border-b border-[#334155]">
           {[
             { key: 'settings', label: '操作设置' },
+            { key: 'recording', label: '操作录制' },
             { key: 'system', label: '系统设置' },
             { key: 'logs', label: '执行日志' },
           ].map(tab => (
@@ -161,7 +350,22 @@ export default function App() {
         {/* Tab Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {activeTab === 'settings' && (
-            <OperationSettings config={config} updateConfig={updateConfig} />
+            <OperationSettings config={config} updateConfig={updateConfig} recording={recording} />
+          )}
+          {activeTab === 'recording' && (
+            <RecordingPanel
+              recorderStatus={recorderStatus}
+              recording={recording}
+              savedFiles={savedFiles}
+              saveName={saveName}
+              setSaveName={setSaveName}
+              onStartRecording={handleStartRecording}
+              onStopRecording={handleStopRecording}
+              onClearRecording={handleClearRecording}
+              onSaveRecording={handleSaveRecording}
+              onLoadRecording={handleLoadRecording}
+              onDeleteRecording={handleDeleteRecording}
+            />
           )}
           {activeTab === 'system' && (
             <SystemSettings config={config} updateConfig={updateConfig} />
@@ -175,15 +379,21 @@ export default function App() {
         <div className="px-4 py-3 bg-[#1e293b]/50 border-t border-[#334155]">
           <div className="flex items-center justify-center gap-6 text-sm">
             <div className="flex items-center gap-2">
-              <kbd className="px-2 py-1 bg-[#334155] rounded text-indigo-400 font-mono text-xs">Ctrl</kbd>
-              <span className="text-gray-500">+</span>
-              <kbd className="px-2 py-1 bg-[#334155] rounded text-indigo-400 font-mono text-xs">F6</kbd>
+              <kbd className="px-2 py-1 bg-[#334155] rounded text-indigo-400 font-mono text-xs">
+                {config.hotkeys.start.split('+').join(' + ')}
+              </kbd>
               <span className="text-gray-400">开始</span>
             </div>
             <div className="flex items-center gap-2">
-              <kbd className="px-2 py-1 bg-[#334155] rounded text-indigo-400 font-mono text-xs">Ctrl</kbd>
-              <span className="text-gray-500">+</span>
-              <kbd className="px-2 py-1 bg-[#334155] rounded text-indigo-400 font-mono text-xs">F7</kbd>
+              <kbd className="px-2 py-1 bg-[#334155] rounded text-indigo-400 font-mono text-xs">
+                {config.hotkeys.pause.split('+').join(' + ')}
+              </kbd>
+              <span className="text-gray-400">暂停/恢复</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <kbd className="px-2 py-1 bg-[#334155] rounded text-indigo-400 font-mono text-xs">
+                {config.hotkeys.stop.split('+').join(' + ')}
+              </kbd>
               <span className="text-gray-400">停止</span>
             </div>
           </div>
@@ -307,11 +517,13 @@ function OperationTypeSelector({ value, onChange }: { value: string; onChange: (
     { key: 'move', label: '鼠标移动', icon: 'M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122' },
     { key: 'click', label: '鼠标点击', icon: 'M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5' },
     { key: 'scroll', label: '滚轮滚动', icon: 'M19 14l-7 7m0 0l-7-7m7 7V3' },
+    { key: 'type', label: '键盘输入', icon: 'M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 001.414.586H19a2 2 0 002-2V7a2 2 0 00-2-2h-8.172a2 2 0 00-1.414.586L3 12z' },
+    { key: 'replay', label: '操作回放', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
   ];
 
   return (
     <Card title="操作类型">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-5 gap-2">
         {options.map(opt => (
           <button
             key={opt.key}
@@ -333,7 +545,7 @@ function OperationTypeSelector({ value, onChange }: { value: string; onChange: (
   );
 }
 
-function OperationSettings({ config, updateConfig }: { config: Config; updateConfig: (k: keyof Config, v: any) => void }) {
+function OperationSettings({ config, updateConfig, recording }: { config: Config; updateConfig: (k: keyof Config, v: any) => void; recording: Recording | null }) {
   return (
     <>
       <OperationTypeSelector
@@ -426,11 +638,80 @@ function OperationSettings({ config, updateConfig }: { config: Config; updateCon
           />
         </Card>
       )}
+      {config.operation_type === 'type' && (
+        <Card title="键盘输入参数">
+          <Slider
+            label="输入间隔"
+            value={config.type_interval}
+            min={0.5}
+            max={10}
+            step={0.5}
+            unit="秒"
+            onChange={v => updateConfig('type_interval', v)}
+          />
+          <div className="space-y-2">
+            <label className="text-sm text-gray-300">输入文本</label>
+            <textarea
+              value={config.type_text}
+              onChange={e => updateConfig('type_text', e.target.value)}
+              placeholder="输入要自动键入的文本..."
+              className="w-full bg-[#334155] text-gray-200 text-sm rounded-lg px-3 py-2 border border-[#475569] focus:border-indigo-500 focus:outline-none h-24 resize-none"
+            />
+          </div>
+          <p className="text-xs text-gray-500">
+            将按照设定的间隔重复输入上方文本
+          </p>
+        </Card>
+      )}
+      {config.operation_type === 'replay' && (
+        <Card title="回放参数">
+          <Slider
+            label="回放间隔"
+            value={config.replay_interval}
+            min={1}
+            max={300}
+            step={1}
+            unit="秒"
+            onChange={v => updateConfig('replay_interval', v)}
+          />
+          <Toggle
+            label="循环回放"
+            checked={config.replay_repeat}
+            onChange={v => updateConfig('replay_repeat', v)}
+          />
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-300">当前录制文件</span>
+            <span className="text-sm text-indigo-400 font-mono">
+              {config.replay_file || '未选择'}
+            </span>
+          </div>
+          {recording && recording.actions.length > 0 && (
+            <button
+              onClick={() => {
+                updateConfig('replay_file', config.replay_file || 'recording');
+              }}
+              className="w-full py-2 bg-indigo-500/20 text-indigo-400 text-sm rounded-lg border border-indigo-500/30 hover:bg-indigo-500/30 transition-colors"
+            >
+              使用当前录制 ({recording.actions.length} 个动作)
+            </button>
+          )}
+          <p className="text-xs text-gray-500">
+            {config.replay_repeat
+              ? '录制操作将循环回放，直到手动停止'
+              : `每隔 ${config.replay_interval} 秒触发一次完整回放`}
+          </p>
+        </Card>
+      )}
     </>
   );
 }
 
 function SystemSettings({ config, updateConfig }: { config: Config; updateConfig: (k: keyof Config, v: any) => void }) {
+  const updateHotkeys = (key: string, value: string) => {
+    const newHotkeys = { ...config.hotkeys, [key]: value };
+    updateConfig('hotkeys', newHotkeys);
+  };
+
   return (
     <>
       <Card title="系统选项">
@@ -445,6 +726,26 @@ function SystemSettings({ config, updateConfig }: { config: Config; updateConfig
           onChange={v => updateConfig('minimize_to_tray', v)}
         />
       </Card>
+      <Card title="快捷键设置">
+        <HotkeyInput
+          label="开始"
+          value={config.hotkeys.start}
+          onChange={v => updateHotkeys('start', v)}
+        />
+        <HotkeyInput
+          label="停止"
+          value={config.hotkeys.stop}
+          onChange={v => updateHotkeys('stop', v)}
+        />
+        <HotkeyInput
+          label="暂停/恢复"
+          value={config.hotkeys.pause}
+          onChange={v => updateHotkeys('pause', v)}
+        />
+        <p className="text-xs text-gray-500">
+          点击输入框后按下新的快捷键组合，修改后需重启应用生效
+        </p>
+      </Card>
       <Card title="关于">
         <div className="text-center space-y-2 py-2">
           <div className="w-12 h-12 bg-indigo-500 rounded-xl mx-auto flex items-center justify-center">
@@ -452,12 +753,61 @@ function SystemSettings({ config, updateConfig }: { config: Config; updateConfig
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
             </svg>
           </div>
-          <p className="text-sm font-medium text-gray-200">MousePaw v1.0.0</p>
+          <p className="text-sm font-medium text-gray-200">MousePaw v1.1.0</p>
           <p className="text-xs text-gray-400">鼠标自动化工具</p>
-          <p className="text-xs text-gray-500">按 Ctrl+F6 开始，按 Ctrl+F7 停止</p>
+          <p className="text-xs text-gray-500">按 {config.hotkeys.start} 开始，按 {config.hotkeys.stop} 停止</p>
         </div>
       </Card>
     </>
+  );
+}
+
+function HotkeyInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const [recording, setRecording] = useState(false);
+  const [keys, setKeys] = useState<string[]>([]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    e.preventDefault();
+    if (!recording) return;
+
+    const key = e.key.toLowerCase();
+    if (key === 'control' || key === 'shift' || key === 'alt' || key === 'meta') {
+      return;
+    }
+
+    const modifiers: string[] = [];
+    if (e.ctrlKey) modifiers.push('ctrl');
+    if (e.shiftKey) modifiers.push('shift');
+    if (e.altKey) modifiers.push('alt');
+
+    const hotkey = [...modifiers, key].join('+');
+    onChange(hotkey);
+    setRecording(false);
+    setKeys([]);
+  };
+
+  const startRecording = () => {
+    setRecording(true);
+    setKeys([]);
+  };
+
+  const displayValue = value.split('+').map(k => k.charAt(0).toUpperCase() + k.slice(1)).join(' + ');
+
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-sm text-gray-300">{label}</span>
+      <button
+        onClick={startRecording}
+        onKeyDown={handleKeyDown}
+        className={`px-3 py-1.5 rounded-lg text-sm font-mono transition-all ${
+          recording
+            ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400'
+            : 'bg-[#334155] border-[#475569] text-gray-200 hover:border-indigo-500'
+        } border`}
+      >
+        {recording ? '按下快捷键...' : displayValue}
+      </button>
+    </div>
   );
 }
 
@@ -486,5 +836,178 @@ function LogPanel({ logs, logsEndRef }: { logs: LogEntry[]; logsEndRef: React.Re
         <div ref={logsEndRef} />
       </div>
     </Card>
+  );
+}
+
+function RecordingPanel({
+  recorderStatus, recording, savedFiles, saveName, setSaveName,
+  onStartRecording, onStopRecording, onClearRecording,
+  onSaveRecording, onLoadRecording, onDeleteRecording,
+}: {
+  recorderStatus: RecorderStatusInfo;
+  recording: Recording | null;
+  savedFiles: string[];
+  saveName: string;
+  setSaveName: (v: string) => void;
+  onStartRecording: () => void;
+  onStopRecording: () => void;
+  onClearRecording: () => void;
+  onSaveRecording: () => void;
+  onLoadRecording: (name: string) => void;
+  onDeleteRecording: (name: string) => void;
+}) {
+  const isRecording = recorderStatus.status === 'recording';
+
+  const actionTypeLabel = (t: string) => {
+    switch (t) {
+      case 'move': return '移动';
+      case 'click': return '点击';
+      case 'scroll': return '滚轮';
+      case 'key': return '按键';
+      default: return t;
+    }
+  };
+
+  const actionDetail = (a: RecordedAction) => {
+    switch (a.type) {
+      case 'move': return `(${a.x ?? 0}, ${a.y ?? 0})`;
+      case 'click': {
+        const btn = { left: '左键', right: '右键', center: '中键' }[a.button || ''] || a.button;
+        return `${btn} (${a.x ?? 0}, ${a.y ?? 0})`;
+      }
+      case 'scroll': {
+        const dir = { up: '↑', down: '↓', left: '←', right: '→' }[a.direction || ''] || a.direction;
+        return `${dir} ${a.amount ?? 0}格`;
+      }
+      case 'key': return a.keychar || '';
+      default: return '';
+    }
+  };
+
+  const typeColor = (t: string) => {
+    switch (t) {
+      case 'move': return 'text-blue-400';
+      case 'click': return 'text-green-400';
+      case 'scroll': return 'text-yellow-400';
+      case 'key': return 'text-purple-400';
+      default: return 'text-gray-400';
+    }
+  };
+
+  return (
+    <>
+      {/* Recording Controls */}
+      <Card title="录制控制">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className={`w-3 h-3 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-gray-500'}`} />
+            <span className={`text-sm font-medium ${isRecording ? 'text-red-400' : 'text-gray-400'}`}>
+              {isRecording ? '录制中...' : '就绪'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {isRecording ? (
+              <button
+                onClick={onStopRecording}
+                className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm rounded-lg transition-colors"
+              >
+                停止录制
+              </button>
+            ) : (
+              <button
+                onClick={onStartRecording}
+                className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-sm rounded-lg transition-colors"
+              >
+                开始录制
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-4 text-sm text-gray-400 pt-2">
+          <span>动作数: <span className="text-gray-200 font-mono">{recorderStatus.count}</span></span>
+          <span>时长: <span className="text-gray-200 font-mono">{(recorderStatus.duration ?? 0).toFixed(1)}s</span></span>
+        </div>
+        <p className="text-xs text-gray-500">
+          {isRecording
+            ? '正在录制全局鼠标和键盘操作，所有操作将被记录供回放使用'
+            : '点击"开始录制"后，操作鼠标（移动、点击、滚轮）和键盘，程序将自动记录'}
+        </p>
+      </Card>
+
+      {/* Current Recording Info */}
+      {recording && recording.actions.length > 0 && (
+        <Card title={`录制数据 (${recording.actions.length} 个动作 / ${(recording.duration ?? 0).toFixed(1)}s)`}>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <button
+                onClick={onClearRecording}
+                className="flex-1 py-2 bg-red-500/10 text-red-400 text-sm rounded-lg border border-red-500/30 hover:bg-red-500/20 transition-colors"
+              >
+                清除
+              </button>
+            </div>
+
+            {/* Save */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={saveName}
+                onChange={e => setSaveName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && onSaveRecording()}
+                placeholder="输入保存名称..."
+                className="flex-1 bg-[#334155] text-gray-200 text-sm rounded-lg px-3 py-2 border border-[#475569] focus:border-indigo-500 focus:outline-none"
+              />
+              <button
+                onClick={onSaveRecording}
+                disabled={!saveName.trim()}
+                className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:bg-[#475569] disabled:text-gray-500 text-white text-sm rounded-lg transition-colors"
+              >
+                保存
+              </button>
+            </div>
+
+            {/* Action List */}
+            <div className="bg-[#0f172a] rounded-lg p-2 max-h-48 overflow-y-auto font-mono text-xs">
+              {recording.actions.map((a, i) => (
+                <div key={i} className="py-0.5 flex gap-2 items-center">
+                  <span className="text-gray-500 w-14 shrink-0">{a.time_offset.toFixed(1)}s</span>
+                  <span className={`shrink-0 w-10 ${typeColor(a.type)}`}>{actionTypeLabel(a.type)}</span>
+                  <span className="text-gray-300 truncate">{actionDetail(a)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Saved Files */}
+      <Card title="已保存的录制">
+        {savedFiles.length === 0 ? (
+          <p className="text-sm text-gray-500 text-center py-4">暂无已保存的录制文件</p>
+        ) : (
+          <div className="space-y-2">
+            {savedFiles.map(name => (
+              <div key={name} className="flex items-center justify-between bg-[#0f172a] rounded-lg px-3 py-2">
+                <span className="text-sm text-gray-300 font-mono">{name}</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => onLoadRecording(name)}
+                    className="px-3 py-1 bg-indigo-500/20 text-indigo-400 text-xs rounded hover:bg-indigo-500/30 transition-colors"
+                  >
+                    加载
+                  </button>
+                  <button
+                    onClick={() => onDeleteRecording(name)}
+                    className="px-3 py-1 bg-red-500/10 text-red-400 text-xs rounded hover:bg-red-500/20 transition-colors"
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </>
   );
 }
